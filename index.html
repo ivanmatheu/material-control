@@ -400,6 +400,17 @@
       modal.classList.add('active');
     };
 
+    // Format quantities and lengths consistently in the detail modal.
+    // Yard quantities are shown against total outgoing quantity; yard lengths
+    // are shown against total outgoing length. All values come from data.json.
+    const formatMetricNumber = (value) => Number(value || 0).toLocaleString('en-US', {
+      maximumFractionDigits: 2
+    });
+    const formatQuantityOf = (value, total, unit) =>
+      `${formatMetricNumber(value)} of ${formatMetricNumber(total)} ${unit}`;
+    const formatLengthOf = (value, total) =>
+      `${formatMetricNumber(value)} of ${formatMetricNumber(total)} m`;
+
     // Render the main modal content
     const renderModalMainContent = (item) => {
       const modalContent = document.getElementById('modalContent');
@@ -434,8 +445,8 @@
                 <div class="detail-sy-sub">Outgoing share: ${sy1Pct}%</div>
               </div>
               <div class="detail-metrics">
-                <div class="detail-qty">${(item.sy1Out || 0).toLocaleString()} ${item.unit}</div>
-                ${item.sy1Len ? `<div class="detail-length">${item.sy1Len}</div>` : ''}
+                <div class="detail-qty">${formatQuantityOf(item.sy1Out, item.done, item.unit)}</div>
+                ${item.sy1LenRaw != null && item.doneLen != null ? `<div class="detail-length">${formatLengthOf(item.sy1LenRaw, item.doneLen)}</div>` : ''}
               </div>
             </div>
 
@@ -445,8 +456,8 @@
                 <div class="detail-sy-sub">Outgoing share: ${sy2Pct}%</div>
               </div>
               <div class="detail-metrics">
-                <div class="detail-qty">${(item.sy2Out || 0).toLocaleString()} ${item.unit}</div>
-                ${item.sy2Len ? `<div class="detail-length">${item.sy2Len}</div>` : ''}
+                <div class="detail-qty">${formatQuantityOf(item.sy2Out, item.done, item.unit)}</div>
+                ${item.sy2LenRaw != null && item.doneLen != null ? `<div class="detail-length">${formatLengthOf(item.sy2LenRaw, item.doneLen)}</div>` : ''}
               </div>
             </div>
           </div>
@@ -489,8 +500,8 @@
               <div class="detail-sy-sub">Outgoing share: ${sy1Pct}%</div>
             </div>
             <div class="detail-metrics">
-              <div class="detail-qty">${(subItem.sy1Out || 0).toLocaleString()} ${subItem.unit}</div>
-              ${subItem.sy1Len ? `<div class="detail-length">${subItem.sy1Len}</div>` : ''}
+              <div class="detail-qty">${formatQuantityOf(subItem.sy1Out, subItem.doneRaw, subItem.unit)}</div>
+              ${subItem.sy1LenRaw != null && subItem.doneLenRaw != null ? `<div class="detail-length">${formatLengthOf(subItem.sy1LenRaw, subItem.doneLenRaw)}</div>` : ''}
             </div>
           </div>
 
@@ -500,8 +511,8 @@
               <div class="detail-sy-sub">Outgoing share: ${sy2Pct}%</div>
             </div>
             <div class="detail-metrics">
-              <div class="detail-qty">${(subItem.sy2Out || 0).toLocaleString()} ${subItem.unit}</div>
-              ${subItem.sy2Len ? `<div class="detail-length">${subItem.sy2Len}</div>` : ''}
+              <div class="detail-qty">${formatQuantityOf(subItem.sy2Out, subItem.doneRaw, subItem.unit)}</div>
+              ${subItem.sy2LenRaw != null && subItem.doneLenRaw != null ? `<div class="detail-length">${formatLengthOf(subItem.sy2LenRaw, subItem.doneLenRaw)}</div>` : ''}
             </div>
           </div>
         </div>
@@ -618,10 +629,27 @@
       });
     };
 
+    /* =====================================================================
+       >>> PDF ALLOW-LIST EDIT GUIDE — SEARCH: EDIT ALLOW-LIST HERE <<<
+       This function controls WHICH items are shown, not their live values.
+       Qty, length, and progress continue to come from ./data.json.
+
+       To allow another variant of an existing item, update the matching
+       highlighted list/array below. To add a completely new category (e.g. Valves),
+       copy/customize the NEW CATEGORY TEMPLATE near `return null` and activate only
+       the approved items that should appear in the PDF list.
+
+       To add a NEW LBCV group, update BOTH LBCV group-number patterns marked
+       in this file: (1) `groupMatch` below, and (2) `steelGroupHeader` inside
+       parseAndLoadJSON. Then add that group's Column/Rafter/Girder numbers.
+       ===================================================================== */
+    // >>> EDIT ALLOW-LIST HERE: master item-matching rules start here <<<
     // The PDF defines the visible item list only. Values are always read live from data.json.
     const identifyAllowedMaterial = (rawName, steelGroup = '') => {
       const name = String(rawName || '').trim();
       const upper = name.toUpperCase();
+
+      // >>> EDIT ALLOW-LIST HERE: permitted LBCV group numbers <<<
       const groupMatch = String(steelGroup || '').match(/\bLBCV\s*(2|6|7|12)\b/i);
 
       // Long pipes (these are aggregated into one dashboard card with individual details).
@@ -655,6 +683,7 @@
             if (re.test(upper)) { angle = candidate; break; }
           }
         }
+        // >>> EDIT ALLOW-LIST HERE: permitted coated HIB coating/angle pairs <<<
         const allowedBends = new Set(['3LPE|22.5', '3LPE|25', '3LPE|45', '3LPE|30', 'Epoxy|45', 'Epoxy|60', '3LPE|80', '3LPE|90', 'Epoxy|90']);
         if (angle && allowedBends.has(`${coating}|${angle}`)) {
           return { category: 'Hot Induction Bend, Coated', displayName: `${coating} ${angle}°` };
@@ -673,6 +702,7 @@
 
       // Reinforcement steel: only D10, D13, D16 and D19.
       if (/BESI\s*BETON|REINFORCEMENT\s*STEEL/i.test(upper)) {
+        // >>> EDIT ALLOW-LIST HERE: permitted reinforcement steel sizes <<<
         for (const size of ['D10', 'D13', 'D16', 'D19']) {
           if (new RegExp(`\\b${size}\\b`, 'i').test(upper.replace(/-/g, ' ')))
             return { category: 'Reinforcement Steel Bar', displayName: `Besi Beton ${size}` };
@@ -690,6 +720,7 @@
       if (/ANCHOR\s*BOLT/i.test(upper)) {
         if (/3\s*\/\s*4|3\/4/.test(upper))
           return { category: 'Anchor Bolt', displayName: 'Anchor Bolt 3/4"' };
+        // >>> EDIT ALLOW-LIST HERE: permitted anchor bolt specs <<<
         for (const spec of [
           ['M 12', /M\s*12\b/i, 'Anchor Bolt M 12, HDG 330'],
           ['M 16', /M\s*16\b/i, 'Anchor Bolt M 16, HDG 400'],
@@ -702,6 +733,7 @@
         }
       }
 
+      // >>> EDIT ALLOW-LIST HERE: permitted wiremesh sizes <<<
       if (/WIREMESH/i.test(upper)) {
         if (/UM\s*6\b/i.test(upper)) return { category: 'Wiremesh', displayName: 'Wiremesh UM 6' };
         if (/UM\s*8\b/i.test(upper)) return { category: 'Wiremesh', displayName: 'Wiremesh UM 8' };
@@ -713,6 +745,7 @@
       if (/U\s*[- ]?DITCH/i.test(upper))
         return { category: 'U-Ditch', displayName: 'U-Ditch' };
 
+      // >>> EDIT ALLOW-LIST HERE: STEEL STRUCTURE — Columns, Rafters, Girders <<<
       // Steel Structure: allow only the exact LBCV components listed in progress.pdf.
       // Keep the parent LBCV group in every display name because CL/RGY/GX IDs repeat.
       if (groupMatch) {
@@ -721,6 +754,7 @@
         const columnMatch = upper.match(/\bCL\s*[- ]?\s*(\d{1,2})\b/i);
         if (columnMatch) {
           const clNo = Number(columnMatch[1]);
+          // >>> EDIT ALLOW-LIST HERE: Column CL numbers per LBCV group <<<
           const allowedColumns = (groupNo === '6' || groupNo === '12')
             ? [1, 2, 3]
             : [1, 2, 3, 4, 5, 6];
@@ -735,6 +769,7 @@
         const rafterMatch = upper.match(/\bRGY1\s*[- ]?\s*(\d{1,2})\b/i);
         if (rafterMatch) {
           const rafterNo = Number(rafterMatch[1]);
+          // >>> EDIT ALLOW-LIST HERE: Rafter RGY1 numbers per LBCV group <<<
           const allowedRafters = {
             '2': [2, 3, 4, 7],
             '7': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -750,6 +785,7 @@
         const girderMatch = upper.match(/\bGX1\s*[- ]?\s*(\d{1,2})\b/i);
         if (girderMatch) {
           const girderNo = Number(girderMatch[1]);
+          // >>> EDIT ALLOW-LIST HERE: Girder GX1 numbers per LBCV group <<<
           const allowedGirders = {
             '2': [2, 3, 5, 6],
             '7': [2, 3, 5, 6]
@@ -763,8 +799,28 @@
         }
       }
 
+      // >>> EDIT ALLOW-LIST HERE: NEW CATEGORY TEMPLATE — VALVES (EXAMPLE ONLY) <<<
+      // This template is intentionally DISABLED. Do not activate it until Valve items
+      // are part of your approved/PDF list and you know how their names appear in data.json.
+      //
+      // HOW TO ADD A NEW CATEGORY:
+      // 1. Copy the example rule below OUTSIDE this comment block, just above `return null`.
+      // 2. Adjust the pattern to match the relevant Valve name/specification in data.json.
+      // 3. Add one rule per approved Valve item, and give each item a sufficiently unique displayName.
+      // 4. Keep the actual quantity/progress fields in data.json; this rule only controls visibility/name/category.
+      //
+      // Example, if the data.json item name contains a Ball Valve and size 2 inch:
+      /*
+      if (/\bBALL\s+VALVE\b/i.test(upper) && /\b2\s*(?:INCH|IN|")/i.test(upper)) {
+        return { category: 'Valves', displayName: 'Ball Valve 2"' };
+      }
+      */
+      // >>> END NEW CATEGORY TEMPLATE <<<
+
+      // >>> EDIT ALLOW-LIST HERE: add an ACTIVE new material-type matching rule above this line. <<<
       return null;
     };
+    // >>> EDIT ALLOW-LIST HERE: master item-matching rules end here <<<
 
     const parseAndLoadJSON = async () => {
       try {
@@ -784,6 +840,7 @@
             .join(' ');
 
           // Accept both parent labels like "LBCV 2" and legacy labels like "COLUMN LBCV 2".
+          // >>> EDIT ALLOW-LIST HERE: keep this group pattern in sync with groupMatch above <<<
           const steelGroupHeader = rowText.match(/\bLBCV\s*(2|6|7|12)\b/i);
           if (steelGroupHeader) currentSteelGroup = `LBCV ${steelGroupHeader[1]}`;
           else if (/STEEL\s*STRUCTURE/i.test(rowText)) currentSteelGroup = '';
@@ -818,14 +875,16 @@
             const doneQty = parseFloat(row['Unnamed: 18']) || 0;
             const doneLen = parseFloat(row['Unnamed: 19']) || 0;
             const sy1Out = parseFloat(row['Unnamed: 6']) || 0;
-            const sy1Len = row['Unnamed: 7'] ? `${parseFloat(row['Unnamed: 7']).toLocaleString()} m` : null;
+            const sy1LenRaw = row['Unnamed: 7'] != null && String(row['Unnamed: 7']).trim() !== ''
+              ? (parseFloat(row['Unnamed: 7']) || 0) : null;
             const sy2Out = parseFloat(row['Unnamed: 12']) || 0;
-            const sy2Len = row['Unnamed: 13'] ? `${parseFloat(row['Unnamed: 13']).toLocaleString()} m` : null;
+            const sy2LenRaw = row['Unnamed: 13'] != null && String(row['Unnamed: 13']).trim() !== ''
+              ? (parseFloat(row['Unnamed: 13']) || 0) : null;
             const remark = row['Unnamed: 22'] || '';
 
             pipeItems.push({
               name, doneQty, totalQty, doneLen, unit,
-              sy1Out, sy1Len, sy2Out, sy2Len, remark
+              sy1Out, sy1LenRaw, sy2Out, sy2LenRaw, remark
             });
             return;
           }
@@ -846,16 +905,18 @@
             const doneQty = parseFloat(row['Unnamed: 18']) || 0;
             const doneLen = parseFloat(row['Unnamed: 19']) || 0;
             const sy1Out = parseFloat(row['Unnamed: 6']) || 0;
-            const sy1Len = row['Unnamed: 7'] ? `${parseFloat(row['Unnamed: 7']).toLocaleString()} m` : null;
+            const sy1LenRaw = row['Unnamed: 7'] != null && String(row['Unnamed: 7']).trim() !== ''
+              ? (parseFloat(row['Unnamed: 7']) || 0) : null;
             const sy2Out = parseFloat(row['Unnamed: 12']) || 0;
-            const sy2Len = row['Unnamed: 13'] ? `${parseFloat(row['Unnamed: 13']).toLocaleString()} m` : null;
+            const sy2LenRaw = row['Unnamed: 13'] != null && String(row['Unnamed: 13']).trim() !== ''
+              ? (parseFloat(row['Unnamed: 13']) || 0) : null;
             const remark = row['Unnamed: 22'] || '';
 
             parsedList.push({
               category: allowed.category, name, unit,
-              done: doneQty, total: totalQty,
+              done: doneQty, total: totalQty, doneLen,
               subUnit: doneLen > 0 ? `${doneLen.toLocaleString()} m` : null,
-              hasDetail: true, sy1Out, sy1Len, sy2Out, sy2Len, remark
+              hasDetail: true, sy1Out, sy1LenRaw, sy2Out, sy2LenRaw, remark
             });
           }
         });
@@ -878,9 +939,10 @@
               unit: pipe.unit,
               length: pipe.doneLen > 0 ? `${pipe.doneLen.toLocaleString()} m` : '',
               sy1Out: pipe.sy1Out,
-              sy1Len: pipe.sy1Len,
+              sy1LenRaw: pipe.sy1LenRaw,
               sy2Out: pipe.sy2Out,
-              sy2Len: pipe.sy2Len,
+              sy2LenRaw: pipe.sy2LenRaw,
+              doneLenRaw: pipe.doneLen,
               remark: pipe.remark
             };
           });
