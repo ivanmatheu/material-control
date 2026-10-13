@@ -151,6 +151,14 @@
     .btn-secondary { padding: 9px 16px; font-size: .8rem; }
     .btn-modal-action:hover, .btn-secondary:hover { background: #edf3fb; border-color: #c8d6e9; }
     .no-export { display: none !important; }
+    .dashboard-content { width: 100%; min-width: 0; }
+    .dashboard-content .material-card,
+    .dashboard-content .stat-card,
+    .dashboard-content header {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .pdf-exporting { background: #f3f6fb !important; }
     .load-error { grid-column: 1 / -1; border-radius: 14px; background: #fff1f1; border: 1px solid #f3caca; color: #a52e35; padding: 18px; line-height: 1.5; }
 
     @media (max-width: 1050px) { .materials-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -199,6 +207,7 @@
 </head>
 <body>
 
+  <main id="dashboardContent" class="dashboard-content">
   <header>
     <div class="header-topbar">
       <div class="brand-logo">
@@ -265,6 +274,8 @@
 
   <!-- Cards Grid View -->
   <div class="materials-grid" id="materialsGrid"></div>
+
+  </main>
 
   <!-- Material detail modal -->
   <div class="modal-overlay" id="detailModal">
@@ -400,16 +411,28 @@
       modal.classList.add('active');
     };
 
-    // Format quantities and lengths consistently in the detail modal.
-    // Yard quantities are shown against total outgoing quantity; yard lengths
-    // are shown against total outgoing length. All values come from data.json.
+    // Format yard-specific quantity and length totals in the detail modal.
+    // The denominator is the total assigned to the same SY, never the grand total.
+    // All values are read from data.json.
     const formatMetricNumber = (value) => Number(value || 0).toLocaleString('en-US', {
       maximumFractionDigits: 2
     });
     const formatQuantityOf = (value, total, unit) =>
-      `${formatMetricNumber(value)} of ${formatMetricNumber(total)} ${unit}`;
+      total == null
+        ? `${formatMetricNumber(value)} ${unit}`
+        : `${formatMetricNumber(value)} of ${formatMetricNumber(total)} ${unit}`;
     const formatLengthOf = (value, total) =>
-      `${formatMetricNumber(value)} of ${formatMetricNumber(total)} m`;
+      total == null
+        ? `${formatMetricNumber(value)} m`
+        : `${formatMetricNumber(value)} of ${formatMetricNumber(total)} m`;
+    // Read optional numeric values from data.json without converting empty cells to zero.
+    const parseOptionalNumber = (value) => {
+      if (value == null || String(value).trim() === '') return null;
+      const parsed = Number(String(value).replace(/,/g, '').trim());
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const calculatePercentage = (value, total) =>
+      total == null ? null : (Number(total) > 0 ? ((Number(value || 0) / Number(total)) * 100).toFixed(1) : '0.0');
 
     // Render the main modal content
     const renderModalMainContent = (item) => {
@@ -434,30 +457,30 @@
         });
         html += '</div>';
       } else {
-        const sy1Pct = typeof item.done === 'number' && item.done > 0 ? ((item.sy1Out / item.done) * 100).toFixed(1) : 0;
-        const sy2Pct = typeof item.done === 'number' && item.done > 0 ? ((item.sy2Out / item.done) * 100).toFixed(1) : 0;
+        const sy1Pct = calculatePercentage(item.sy1Out, item.sy1TotalQty);
+        const sy2Pct = calculatePercentage(item.sy2Out, item.sy2TotalQty);
 
         html = `
           <div class="detail-grid">
             <div class="detail-box">
               <div>
                 <div class="detail-sy-title">Stock Yard 1 (SY1)</div>
-                <div class="detail-sy-sub">Outgoing share: ${sy1Pct}%</div>
+                <div class="detail-sy-sub">Outgoing share: ${sy1Pct == null ? 'N/A' : sy1Pct + '%'}</div>
               </div>
               <div class="detail-metrics">
-                <div class="detail-qty">${formatQuantityOf(item.sy1Out, item.done, item.unit)}</div>
-                ${item.sy1LenRaw != null && item.doneLen != null ? `<div class="detail-length">${formatLengthOf(item.sy1LenRaw, item.doneLen)}</div>` : ''}
+                <div class="detail-qty">${formatQuantityOf(item.sy1Out, item.sy1TotalQty, item.unit)}</div>
+                ${item.sy1LenRaw != null ? `<div class="detail-length">${formatLengthOf(item.sy1LenRaw, item.sy1TotalLenRaw)}</div>` : ''}
               </div>
             </div>
 
             <div class="detail-box">
               <div>
                 <div class="detail-sy-title">Stock Yard 2 (SY2)</div>
-                <div class="detail-sy-sub">Outgoing share: ${sy2Pct}%</div>
+                <div class="detail-sy-sub">Outgoing share: ${sy2Pct == null ? 'N/A' : sy2Pct + '%'}</div>
               </div>
               <div class="detail-metrics">
-                <div class="detail-qty">${formatQuantityOf(item.sy2Out, item.done, item.unit)}</div>
-                ${item.sy2LenRaw != null && item.doneLen != null ? `<div class="detail-length">${formatLengthOf(item.sy2LenRaw, item.doneLen)}</div>` : ''}
+                <div class="detail-qty">${formatQuantityOf(item.sy2Out, item.sy2TotalQty, item.unit)}</div>
+                ${item.sy2LenRaw != null ? `<div class="detail-length">${formatLengthOf(item.sy2LenRaw, item.sy2TotalLenRaw)}</div>` : ''}
               </div>
             </div>
           </div>
@@ -486,8 +509,8 @@
       document.getElementById('modalItemTitle').textContent = `Pipes - ${subItem.label}`;
       document.getElementById('modalItemSub').textContent = `Total Progress: ${subItem.done} of ${subItem.total} ${subItem.unit}${subItem.length ? ' = ' + subItem.length : ''}`;
 
-      const sy1Pct = subItem.doneRaw > 0 ? ((subItem.sy1Out / subItem.doneRaw) * 100).toFixed(1) : 0;
-      const sy2Pct = subItem.doneRaw > 0 ? ((subItem.sy2Out / subItem.doneRaw) * 100).toFixed(1) : 0;
+      const sy1Pct = calculatePercentage(subItem.sy1Out, subItem.sy1TotalQty);
+      const sy2Pct = calculatePercentage(subItem.sy2Out, subItem.sy2TotalQty);
 
       let html = `
         <div style="margin-bottom: 12px;">
@@ -497,22 +520,22 @@
           <div class="detail-box">
             <div>
               <div class="detail-sy-title">Stock Yard 1 (SY1)</div>
-              <div class="detail-sy-sub">Outgoing share: ${sy1Pct}%</div>
+              <div class="detail-sy-sub">Outgoing share: ${sy1Pct == null ? 'N/A' : sy1Pct + '%'}</div>
             </div>
             <div class="detail-metrics">
-              <div class="detail-qty">${formatQuantityOf(subItem.sy1Out, subItem.doneRaw, subItem.unit)}</div>
-              ${subItem.sy1LenRaw != null && subItem.doneLenRaw != null ? `<div class="detail-length">${formatLengthOf(subItem.sy1LenRaw, subItem.doneLenRaw)}</div>` : ''}
+              <div class="detail-qty">${formatQuantityOf(subItem.sy1Out, subItem.sy1TotalQty, subItem.unit)}</div>
+              ${subItem.sy1LenRaw != null ? `<div class="detail-length">${formatLengthOf(subItem.sy1LenRaw, subItem.sy1TotalLenRaw)}</div>` : ''}
             </div>
           </div>
 
           <div class="detail-box">
             <div>
               <div class="detail-sy-title">Stock Yard 2 (SY2)</div>
-              <div class="detail-sy-sub">Outgoing share: ${sy2Pct}%</div>
+              <div class="detail-sy-sub">Outgoing share: ${sy2Pct == null ? 'N/A' : sy2Pct + '%'}</div>
             </div>
             <div class="detail-metrics">
-              <div class="detail-qty">${formatQuantityOf(subItem.sy2Out, subItem.doneRaw, subItem.unit)}</div>
-              ${subItem.sy2LenRaw != null && subItem.doneLenRaw != null ? `<div class="detail-length">${formatLengthOf(subItem.sy2LenRaw, subItem.doneLenRaw)}</div>` : ''}
+              <div class="detail-qty">${formatQuantityOf(subItem.sy2Out, subItem.sy2TotalQty, subItem.unit)}</div>
+              ${subItem.sy2LenRaw != null ? `<div class="detail-length">${formatLengthOf(subItem.sy2LenRaw, subItem.sy2TotalLenRaw)}</div>` : ''}
             </div>
           </div>
         </div>
@@ -560,72 +583,191 @@
       render(filtered);
     };
 
-    // Export modal details
-    const exportModalToPDF = () => {
-      const modalControls = document.getElementById('modalExportControls');
-      modalControls.classList.add('no-export');
+    // Shared PDF exporter. Export only a dedicated content element instead of document.body,
+    // so hidden fixed-position overlays cannot interfere with html2canvas/html2pdf rendering.
+    const exportElementToPDF = async (element, filename, options = {}) => {
+      const hideSelectors = options.hideSelectors || [];
+      const hiddenState = [];
+      const temporaryStyles = [];
+      let exportStarted = false;
 
-      const element = document.getElementById('modalCardContainer');
-      const filename = `${document.getElementById('modalItemTitle').textContent.replace(/[^a-zA-Z0-9]/g, '_')}_Detail.pdf`;
-
-      const opt = {
-        margin:       [10, 10, 10, 10],
-        filename:     filename,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'mm', format: 'a5', orientation: 'landscape' }
+      const setTemporaryStyle = (node, property, value) => {
+        if (!node) return;
+        temporaryStyles.push({ node, property, previous: node.style[property] });
+        node.style[property] = value;
       };
 
-      html2pdf().set(opt).from(element).save().then(() => {
-        modalControls.classList.remove('no-export');
+      try {
+        if (!element) throw new Error('The content area to export could not be found.');
+        if (typeof window.html2pdf !== 'function') {
+          throw new Error('The PDF library did not load. Check your internet connection, then reload the dashboard.');
+        }
+
+        // Hide controls only during capture, then restore exactly their prior state.
+        const toHide = new Set();
+        hideSelectors.forEach(selector => {
+          document.querySelectorAll(selector).forEach(node => toHide.add(node));
+        });
+        toHide.forEach(node => {
+          const wasHidden = node.classList.contains('no-export');
+          hiddenState.push({ node, wasHidden });
+          node.classList.add('no-export');
+        });
+
+        // Make sure the browser has finished layout and font rendering before capturing.
+        if (document.fonts && document.fonts.ready) {
+          try { await document.fonts.ready; } catch (_) { /* Continue with fallback fonts. */ }
+        }
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const captureWidth = Math.max(1100, Math.min(1400, element.scrollWidth || element.offsetWidth || 1100));
+        const opt = {
+          margin: options.margin || [8, 8, 10, 8],
+          filename,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: {
+            scale: 1.7,
+            useCORS: true,
+            allowTaint: false,
+            backgroundColor: options.backgroundColor || '#f3f6fb',
+            logging: false,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: captureWidth
+          },
+          jsPDF: {
+            unit: 'mm',
+            format: options.format || 'a4',
+            orientation: options.orientation || 'portrait',
+            compress: true
+          },
+          pagebreak: { mode: ['css', 'legacy'], avoid: ['.material-card', '.stat-card', '.detail-box'] }
+        };
+
+        exportStarted = true;
+        await window.html2pdf().set(opt).from(element).save();
+      } catch (error) {
+        console.error('PDF export failed:', error);
+        window.alert(`Unable to export PDF. ${error && error.message ? error.message : 'Please reload the dashboard and try again.'}`);
+      } finally {
+        hiddenState.forEach(({ node, wasHidden }) => {
+          if (!wasHidden) node.classList.remove('no-export');
+        });
+        temporaryStyles.reverse().forEach(({ node, property, previous }) => {
+          node.style[property] = previous;
+        });
+      }
+      return exportStarted;
+    };
+
+    // Export the open material detail. Inline styles ensure the modal remains visible in the
+    // html2pdf clone even when the ancestor .modal-overlay is not part of the captured element.
+    const exportModalToPDF = async () => {
+      const element = document.getElementById('modalCardContainer');
+      if (!element) return;
+
+      const modalBody = element.querySelector('.modal-body');
+      const modalFooter = element.querySelector('.modal-footer');
+      const closeButton = element.querySelector('.btn-close');
+
+      const hiddenState = [];
+      [modalFooter, closeButton].filter(Boolean).forEach(node => {
+        const wasHidden = node.classList.contains('no-export');
+        hiddenState.push({ node, wasHidden });
+        node.classList.add('no-export');
       });
+
+      const savedStyles = [];
+      const setStyle = (node, property, value) => {
+        if (!node) return;
+        savedStyles.push({ node, property, previous: node.style[property] });
+        node.style[property] = value;
+      };
+      setStyle(element, 'opacity', '1');
+      setStyle(element, 'transform', 'none');
+      setStyle(element, 'maxHeight', 'none');
+      setStyle(element, 'height', 'auto');
+      setStyle(element, 'overflow', 'visible');
+      setStyle(modalBody, 'overflow', 'visible');
+      setStyle(modalBody, 'maxHeight', 'none');
+      setStyle(modalBody, 'height', 'auto');
+
+      const safeName = document.getElementById('modalItemTitle').textContent.replace(/[^a-zA-Z0-9_-]+/g, '_');
+      try {
+        await exportElementToPDF(element, `${safeName}_Detail.pdf`, {
+          format: 'a5', orientation: 'landscape', margin: [8, 8, 8, 8],
+          backgroundColor: '#ffffff'
+        });
+      } finally {
+        hiddenState.forEach(({ node, wasHidden }) => {
+          if (!wasHidden) node.classList.remove('no-export');
+        });
+        savedStyles.reverse().forEach(({ node, property, previous }) => {
+          node.style[property] = previous;
+        });
+      }
     };
 
     const exportModalToImage = () => {
       const modalControls = document.getElementById('modalExportControls');
-      modalControls.classList.add('no-export');
-
       const element = document.getElementById('modalCardContainer');
-      const filename = `${document.getElementById('modalItemTitle').textContent.replace(/[^a-zA-Z0-9]/g, '_')}_Detail.png`;
+      const filename = `${document.getElementById('modalItemTitle').textContent.replace(/[^a-zA-Z0-9_-]+/g, '_')}_Detail.png`;
+      modalControls.classList.add('no-export');
+      const closeButton = element.querySelector('.btn-close');
+      const modalFooter = element.querySelector('.modal-footer');
+      if (closeButton) closeButton.classList.add('no-export');
+      if (modalFooter) modalFooter.classList.add('no-export');
 
-      html2canvas(element, { scale: 2, useCORS: true }).then(canvas => {
-        const link = document.createElement('a');
-        link.download = filename;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-        modalControls.classList.remove('no-export');
-      });
+      html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 })
+        .then(canvas => {
+          const link = document.createElement('a');
+          link.download = filename;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        })
+        .catch(error => {
+          console.error('Image export failed:', error);
+          window.alert('Unable to export the detail image. Please try again.');
+        })
+        .finally(() => {
+          modalControls.classList.remove('no-export');
+          if (closeButton) closeButton.classList.remove('no-export');
+          if (modalFooter) modalFooter.classList.remove('no-export');
+        });
     };
 
-    // Export the full dashboard
-    const exportToPDF = () => {
-      const actions = document.getElementById('exportControls');
-      actions.classList.add('no-export');
-
-      const element = document.body;
-      const opt = {
-        margin:       [10, 10, 10, 10],
-        filename:     'Material_Stock_Report.pdf',
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-
-      html2pdf().set(opt).from(element).save().then(() => {
-        actions.classList.remove('no-export');
+    // Export the dashboard content only (not document.body or the hidden detail modal).
+    const exportToPDF = async () => {
+      const element = document.getElementById('dashboardContent');
+      await exportElementToPDF(element, 'Material_Stock_Report.pdf', {
+        format: 'a4', orientation: 'portrait', margin: [8, 8, 10, 8],
+        hideSelectors: ['#exportControls', '#filterControls']
       });
     };
 
     const exportToImage = () => {
       const actions = document.getElementById('exportControls');
+      const filterControls = document.getElementById('filterControls');
+      const alreadyHidden = actions.classList.contains('no-export');
+      const filterAlreadyHidden = filterControls.classList.contains('no-export');
       actions.classList.add('no-export');
+      filterControls.classList.add('no-export');
+      const element = document.getElementById('dashboardContent');
 
-      html2canvas(document.body, { scale: 2, useCORS: true }).then(canvas => {
+      html2canvas(element, {
+        scale: 1.7, useCORS: true, backgroundColor: '#f3f6fb',
+        scrollX: 0, scrollY: 0, windowWidth: Math.max(1100, element.scrollWidth || 1100)
+      }).then(canvas => {
         const link = document.createElement('a');
         link.download = 'Material_Stock_Report.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
-        actions.classList.remove('no-export');
+      }).catch(error => {
+        console.error('Image export failed:', error);
+        window.alert('Unable to export the dashboard image. Please try again.');
+      }).finally(() => {
+        if (!alreadyHidden) actions.classList.remove('no-export');
+        if (!filterAlreadyHidden) filterControls.classList.remove('no-export');
       });
     };
 
@@ -874,17 +1016,21 @@
             const totalQty = parseFloat(row['Unnamed: 16']) || 0;
             const doneQty = parseFloat(row['Unnamed: 18']) || 0;
             const doneLen = parseFloat(row['Unnamed: 19']) || 0;
+            // Outdoor layout: yard totals (quantity / length) precede yard outgoing (quantity / length).
+            const sy1TotalQty = parseOptionalNumber(row['Unnamed: 4']);
+            const sy1TotalLenRaw = parseOptionalNumber(row['Unnamed: 5']);
             const sy1Out = parseFloat(row['Unnamed: 6']) || 0;
-            const sy1LenRaw = row['Unnamed: 7'] != null && String(row['Unnamed: 7']).trim() !== ''
-              ? (parseFloat(row['Unnamed: 7']) || 0) : null;
+            const sy1LenRaw = parseOptionalNumber(row['Unnamed: 7']);
+            const sy2TotalQty = parseOptionalNumber(row['Unnamed: 10']);
+            const sy2TotalLenRaw = parseOptionalNumber(row['Unnamed: 11']);
             const sy2Out = parseFloat(row['Unnamed: 12']) || 0;
-            const sy2LenRaw = row['Unnamed: 13'] != null && String(row['Unnamed: 13']).trim() !== ''
-              ? (parseFloat(row['Unnamed: 13']) || 0) : null;
+            const sy2LenRaw = parseOptionalNumber(row['Unnamed: 13']);
             const remark = row['Unnamed: 22'] || '';
 
             pipeItems.push({
               name, doneQty, totalQty, doneLen, unit,
-              sy1Out, sy1LenRaw, sy2Out, sy2LenRaw, remark
+              sy1TotalQty, sy1TotalLenRaw, sy1Out, sy1LenRaw,
+              sy2TotalQty, sy2TotalLenRaw, sy2Out, sy2LenRaw, remark
             });
             return;
           }
@@ -892,31 +1038,39 @@
           if (currentSection === 'enclosed') {
             const total = parseFloat(row['Unnamed: 10']) || 0;
             const done = parseFloat(row['Unnamed: 11']) || 0;
+            // Enclosed-warehouse layout: read each SY total separately from its outgoing quantity.
+            const sy1TotalQty = parseOptionalNumber(row['Unnamed: 4']);
             const sy1Out = parseFloat(row['Unnamed: 5']) || 0;
+            const sy2TotalQty = parseOptionalNumber(row['Unnamed: 7']);
             const sy2Out = parseFloat(row['Unnamed: 8']) || 0;
             const remark = row['Unnamed: 13'] || '';
 
             parsedList.push({
               category: allowed.category, name, unit, done, total,
-              hasDetail: true, sy1Out, sy2Out, remark
+              hasDetail: true, sy1TotalQty, sy1Out, sy2TotalQty, sy2Out, remark
             });
           } else if (currentSection === 'outdoor') {
             const totalQty = parseFloat(row['Unnamed: 16']) || 0;
             const doneQty = parseFloat(row['Unnamed: 18']) || 0;
             const doneLen = parseFloat(row['Unnamed: 19']) || 0;
+            // Outdoor layout: read each SY total quantity / length separately from its outgoing quantity / length.
+            const sy1TotalQty = parseOptionalNumber(row['Unnamed: 4']);
+            const sy1TotalLenRaw = parseOptionalNumber(row['Unnamed: 5']);
             const sy1Out = parseFloat(row['Unnamed: 6']) || 0;
-            const sy1LenRaw = row['Unnamed: 7'] != null && String(row['Unnamed: 7']).trim() !== ''
-              ? (parseFloat(row['Unnamed: 7']) || 0) : null;
+            const sy1LenRaw = parseOptionalNumber(row['Unnamed: 7']);
+            const sy2TotalQty = parseOptionalNumber(row['Unnamed: 10']);
+            const sy2TotalLenRaw = parseOptionalNumber(row['Unnamed: 11']);
             const sy2Out = parseFloat(row['Unnamed: 12']) || 0;
-            const sy2LenRaw = row['Unnamed: 13'] != null && String(row['Unnamed: 13']).trim() !== ''
-              ? (parseFloat(row['Unnamed: 13']) || 0) : null;
+            const sy2LenRaw = parseOptionalNumber(row['Unnamed: 13']);
             const remark = row['Unnamed: 22'] || '';
 
             parsedList.push({
               category: allowed.category, name, unit,
               done: doneQty, total: totalQty, doneLen,
               subUnit: doneLen > 0 ? `${doneLen.toLocaleString()} m` : null,
-              hasDetail: true, sy1Out, sy1LenRaw, sy2Out, sy2LenRaw, remark
+              hasDetail: true,
+              sy1TotalQty, sy1TotalLenRaw, sy1Out, sy1LenRaw,
+              sy2TotalQty, sy2TotalLenRaw, sy2Out, sy2LenRaw, remark
             });
           }
         });
@@ -938,8 +1092,12 @@
               doneRaw: pipe.doneQty,
               unit: pipe.unit,
               length: pipe.doneLen > 0 ? `${pipe.doneLen.toLocaleString()} m` : '',
+              sy1TotalQty: pipe.sy1TotalQty,
+              sy1TotalLenRaw: pipe.sy1TotalLenRaw,
               sy1Out: pipe.sy1Out,
               sy1LenRaw: pipe.sy1LenRaw,
+              sy2TotalQty: pipe.sy2TotalQty,
+              sy2TotalLenRaw: pipe.sy2TotalLenRaw,
               sy2Out: pipe.sy2Out,
               sy2LenRaw: pipe.sy2LenRaw,
               doneLenRaw: pipe.doneLen,
