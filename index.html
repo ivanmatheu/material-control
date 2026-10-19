@@ -506,7 +506,10 @@
       const subItem = currentModalItem.breakdown[subIndex];
       const modalContent = document.getElementById('modalContent');
 
-      document.getElementById('modalItemTitle').textContent = `Pipes - ${subItem.label}`;
+      const isHotBendGroup = currentModalItem.category === 'Hot Induction Bend';
+      const childTypeLabel = isHotBendGroup ? 'Hot Induction Bend' : 'Pipes';
+      const groupLabel = isHotBendGroup ? 'Hot Induction Bend' : 'Long Pipes';
+      document.getElementById('modalItemTitle').textContent = `${childTypeLabel} - ${subItem.label}`;
       document.getElementById('modalItemSub').textContent = `Total Progress: ${subItem.done} of ${subItem.total} ${subItem.unit}${subItem.length ? ' = ' + subItem.length : ''}`;
 
       const sy1Pct = calculatePercentage(subItem.sy1Out, subItem.sy1TotalQty);
@@ -514,7 +517,7 @@
 
       let html = `
         <div style="margin-bottom: 12px;">
-          <button class="btn-modal-action" onclick="backToModalMain()">&larr; Back to long pipe list</button>
+          <button class="btn-modal-action" onclick="backToModalMain()">&larr; Back to ${groupLabel} list</button>
         </div>
         <div class="detail-grid">
           <div class="detail-box">
@@ -828,7 +831,11 @@
         // >>> EDIT ALLOW-LIST HERE: permitted coated HIB coating/angle pairs <<<
         const allowedBends = new Set(['3LPE|22.5', '3LPE|25', '3LPE|45', '3LPE|30', 'Epoxy|45', 'Epoxy|60', '3LPE|80', '3LPE|90', 'Epoxy|90']);
         if (angle && allowedBends.has(`${coating}|${angle}`)) {
-          return { category: 'Hot Induction Bend, Coated', displayName: `${coating} ${angle}°` };
+          return {
+            type: 'hotBend',
+            category: 'Hot Induction Bend',
+            displayName: `${coating} ${angle}°`
+          };
         }
       }
 
@@ -974,6 +981,7 @@
         let currentSteelGroup = '';
         const parsedList = [];
         const pipeItems = [];
+        const hotBendItems = [];
 
         rawJson.forEach(row => {
           const col1 = row['Unnamed: 1'];
@@ -1011,7 +1019,7 @@
           const name = allowed.displayName;
           const unit = row['Unnamed: 3'] || 'Jts';
 
-          if (allowed.type === 'longPipe') {
+          if (allowed.type === 'longPipe' || allowed.type === 'hotBend') {
             if (currentSection !== 'outdoor') return;
             const totalQty = parseFloat(row['Unnamed: 16']) || 0;
             const doneQty = parseFloat(row['Unnamed: 18']) || 0;
@@ -1027,7 +1035,8 @@
             const sy2LenRaw = parseOptionalNumber(row['Unnamed: 13']);
             const remark = row['Unnamed: 22'] || '';
 
-            pipeItems.push({
+            const targetItems = allowed.type === 'hotBend' ? hotBendItems : pipeItems;
+            targetItems.push({
               name, doneQty, totalQty, doneLen, unit,
               sy1TotalQty, sy1TotalLenRaw, sy1Out, sy1LenRaw,
               sy2TotalQty, sy2TotalLenRaw, sy2Out, sy2LenRaw, remark
@@ -1075,7 +1084,7 @@
           }
         });
 
-        // Aggregate only the three long-pipe types specified in the PDF.
+        // Aggregate the PDF-listed long-pipe types into one expandable dashboard card.
         if (pipeItems.length > 0) {
           let grandDoneQty = 0;
           let grandTotalQty = 0;
@@ -1115,6 +1124,52 @@
             hasDetail: true,
             breakdown: pipeBreakdown
           });
+        }
+
+        // Aggregate all PDF-allowed coated HIB variants into one expandable card,
+        // matching the Long Pipes interaction pattern while keeping live values from data.json.
+        if (hotBendItems.length > 0) {
+          let grandDoneQty = 0;
+          let grandTotalQty = 0;
+          let grandDoneLen = 0;
+          const hotBendBreakdown = hotBendItems.map(bend => {
+            grandDoneQty += bend.doneQty;
+            grandTotalQty += bend.totalQty;
+            grandDoneLen += bend.doneLen;
+            return {
+              label: bend.name,
+              done: bend.doneQty.toLocaleString(),
+              total: bend.totalQty.toLocaleString(),
+              doneRaw: bend.doneQty,
+              unit: bend.unit,
+              length: bend.doneLen > 0 ? `${bend.doneLen.toLocaleString()} m` : '',
+              sy1TotalQty: bend.sy1TotalQty,
+              sy1TotalLenRaw: bend.sy1TotalLenRaw,
+              sy1Out: bend.sy1Out,
+              sy1LenRaw: bend.sy1LenRaw,
+              sy2TotalQty: bend.sy2TotalQty,
+              sy2TotalLenRaw: bend.sy2TotalLenRaw,
+              sy2Out: bend.sy2Out,
+              sy2LenRaw: bend.sy2LenRaw,
+              doneLenRaw: bend.doneLen,
+              remark: bend.remark
+            };
+          });
+
+          const hotBendParent = {
+            category: 'Hot Induction Bend',
+            name: 'Hot Induction Bend, Coated',
+            done: grandDoneQty,
+            total: grandTotalQty,
+            unit: hotBendItems[0]?.unit || 'Jts',
+            subUnit: grandDoneLen > 0
+              ? `${grandDoneLen.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} m`
+              : null,
+            hasDetail: true,
+            breakdown: hotBendBreakdown
+          };
+          const longPipeIndex = parsedList.findIndex(item => item.category === 'Long Pipes');
+          parsedList.splice(longPipeIndex >= 0 ? longPipeIndex + 1 : 0, 0, hotBendParent);
         }
 
         materialsData = parsedList;
