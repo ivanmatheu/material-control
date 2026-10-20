@@ -829,7 +829,7 @@
           }
         }
         // >>> EDIT ALLOW-LIST HERE: permitted coated HIB coating/angle pairs <<<
-        const allowedBends = new Set(['3LPE|22.5', '3LPE|25', '3LPE|45', '3LPE|30', 'Epoxy|45', 'Epoxy|60', '3LPE|80', '3LPE|90', 'Epoxy|90']);
+        const allowedBends = new Set(['3LPE|22.5', '3LPE|25', '3LPE|45', '3LPE|30', 'Epoxy|45', '3LPE|60', '3LPE|80', '3LPE|90', 'Epoxy|90']);
         if (angle && allowedBends.has(`${coating}|${angle}`)) {
           return {
             type: 'hotBend',
